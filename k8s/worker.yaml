@@ -9,7 +9,6 @@ metadata:
   name: temporal-worker
   namespace: temporal-worker-demo
 spec:
-  replicas: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: temporal-worker
@@ -25,7 +24,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: worker
-          image: temporal-worker-lab:0.1.0
+          image: temporal-worker-lab:0.2.0
           imagePullPolicy: Never
           env:
             - name: TEMPORAL_ADDRESS

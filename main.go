@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,7 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 )
@@ -27,6 +30,54 @@ func WorkerIdentity(ctx workflow.Context) (string, error) {
 
 func reportIdentity() (string, error) {
 	return os.Hostname()
+}
+
+// LongRunningWorkflow gives three worker pods CPU work for the requested duration.
+func LongRunningWorkflow(ctx workflow.Context, seconds int) ([]string, error) {
+	if seconds < 1 || seconds > 600 {
+		return nil, fmt.Errorf("duration must be between 1 and 600 seconds")
+	}
+	duration := time.Duration(seconds) * time.Second
+	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+		StartToCloseTimeout: duration + 30*time.Second,
+		HeartbeatTimeout:    20 * time.Second,
+		RetryPolicy:         &temporal.RetryPolicy{MaximumAttempts: 1},
+	})
+	futures := make([]workflow.Future, 3)
+	for i := range futures {
+		futures[i] = workflow.ExecuteActivity(ctx, burnCPU, seconds)
+	}
+	pods := make([]string, len(futures))
+	for i, future := range futures {
+		if err := future.Get(ctx, &pods[i]); err != nil {
+			return nil, err
+		}
+	}
+	return pods, nil
+}
+
+func burnCPU(ctx context.Context, seconds int) (string, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "", err
+	}
+	started := time.Now()
+	deadline := started.Add(time.Duration(seconds) * time.Second)
+	nextHeartbeat := started
+	sum := sha256.Sum256([]byte(hostname))
+	for now := started; now.Before(deadline); now = time.Now() {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if !now.Before(nextHeartbeat) {
+			activity.RecordHeartbeat(ctx, hostname)
+			nextHeartbeat = now.Add(5 * time.Second)
+		}
+		for range 1024 {
+			sum = sha256.Sum256(sum[:])
+		}
+	}
+	return hostname, nil
 }
 
 func run() error {
@@ -52,6 +103,8 @@ func run() error {
 	})
 	w.RegisterWorkflow(WorkerIdentity)
 	w.RegisterActivity(reportIdentity)
+	w.RegisterWorkflow(LongRunningWorkflow)
+	w.RegisterActivity(burnCPU)
 	if err := w.Start(); err != nil {
 		return fmt.Errorf("start worker: %w", err)
 	}
