@@ -41,3 +41,12 @@ for i in 1 2 3 4; do
 done
 kubectl --context colima -n temporal-worker-demo get hpa temporal-worker --watch
 ```
+
+## Inspect VPA recommendations
+
+With the VPA recommender installed, apply the VPA in `Off` mode. Compare its `Target` with the requests in `k8s/worker.yaml`. HPA continues using the configured CPU request to calculate utilization.
+
+```bash
+kubectl --context colima apply --server-side -f k8s/vpa.yaml
+kubectl --context colima -n temporal-worker-demo describe vpa temporal-worker
+```
