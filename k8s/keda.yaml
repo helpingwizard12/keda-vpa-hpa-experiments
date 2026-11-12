@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-keda
+  namespace: temporal-worker-demo
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: temporal-worker-keda
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: temporal-worker-keda
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: worker
+          image: temporal-worker-lab:0.2.0
+          imagePullPolicy: Never
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: host.lima.internal:7233
+            - name: TEMPORAL_NAMESPACE
+              value: temporal-worker-demo
+            - name: TEMPORAL_TASK_QUEUE
+              value: keda-workers
+            - name: GOMAXPROCS
+              value: "1"
+            - name: GOMEMLIMIT
+              value: 24MiB
+          ports:
+            - name: health
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: health
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 25m
+              memory: 24Mi
+            limits:
+              cpu: 150m
+              memory: 64Mi
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: temporal-worker-keda
+  namespace: temporal-worker-demo
+spec:
+  scaleTargetRef:
+    name: temporal-worker-keda
+  pollingInterval: 5
+  cooldownPeriod: 45
+  minReplicaCount: 0
+  maxReplicaCount: 4
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          # Queued tasks disappear from the metric once a worker takes them.
+          stabilizationWindowSeconds: 120
+  triggers:
+    - type: temporal
+      metadata:
+        endpoint: host.lima.internal:7233
+        namespace: temporal-worker-demo
+        taskQueue: keda-workers
+        queueTypes: workflow,activity
+        targetQueueSize: "2"
+        includeRunningWorkflowCount: "true"

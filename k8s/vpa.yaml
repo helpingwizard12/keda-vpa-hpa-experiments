@@ -9,4 +9,11 @@ spec:
     kind: Deployment
     name: temporal-worker
   updatePolicy:
-    updateMode: 'Off'
+    updateMode: InPlaceOrRecreate
+  resourcePolicy:
+    containerPolicies:
+      - containerName: worker
+        controlledResources: [memory]
+        controlledValues: RequestsOnly
+        maxAllowed:
+          memory: 64Mi
